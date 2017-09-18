@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.Drawing;
 using System.IO;
+using System.Linq;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
@@ -19,14 +20,14 @@ namespace BIAL_FOTO
         private const int IMAGE_SIZE = 28;
         private readonly string PATH;
 
-        private List<TrainingData> ConvertImageToBinary(Bitmap image, string number)
+        private List<TrainingData> ConvertImageToBinary(Bitmap image, string number, int widthHeight)
         {
             var response = new List<TrainingData>();
 
-            double columnsCount = (image.Width / IMAGE_SIZE) - 1;
-            double rawsCount = image.Height / IMAGE_SIZE;
+            int columnsCount = (widthHeight / IMAGE_SIZE) - 1;
+            int rowsCount = widthHeight / IMAGE_SIZE;
 
-            for(var i = 0; i < rawsCount; ++i)
+            for(var i = 0; i < rowsCount; ++i)
             {
                 for(var j = 0; j < columnsCount; ++j)
                 {
@@ -48,6 +49,16 @@ namespace BIAL_FOTO
             }
 
             return response;
+        }
+
+        private int GetWorkableWidthHeight(int value)
+        {
+            for(int i = 0; i <= IMAGE_SIZE; i++)
+            {
+                if ((value - i) % IMAGE_SIZE == 0)
+                    return value - i;
+            }
+            throw new Exception("Badziewna liczba");
         }
 
         private void SaveFile(List<TrainingData> trainingData, string number)
@@ -126,13 +137,12 @@ namespace BIAL_FOTO
             folderProgress.Value = folderProgress.Minimum;
         }
 
-        private void ParseFile(string fileName)
+        private void ParseFile(string fileName, Bitmap image, int widthHeight)
         {
-            var image = new Bitmap(fileName);
             var fileInfo = new FileInfo(fileName);
             var value = fileInfo.Name.Replace(".jpg", "");
 
-            var data = ConvertImageToBinary(image, value);
+            var data = ConvertImageToBinary(image, value, widthHeight);
             SaveFile(data, value);
         }
 
@@ -143,22 +153,64 @@ namespace BIAL_FOTO
 
             var i = 0;
 
-            foreach(var fileName in files)
+            var bitmaps = new Dictionary<string,Bitmap>();
+
+            foreach (var fileName in files)
             {
-                tasks[i] = Task.Run(() => ParseFile(fileName));
+                bitmaps.Add(fileName, new Bitmap(fileName));
+            }
+
+            var commonWidthHeight = GetCommonWidthHeight(bitmaps);
+
+            foreach (var fileName in files)
+            {
+                tasks[i] = Task.Run(() => ParseFile(fileName, bitmaps.Single(x => x.Key == fileName).Value, commonWidthHeight));
                 ++i;
             }
 
             Task.WaitAll(tasks);
         }
 
+        private int GetCommonWidthHeight(Dictionary<string, Bitmap> bitmaps)
+        {
+            int valueToReturn = 0;
+            foreach (var bitmap in bitmaps)
+            {
+                var commonValue = bitmap.Value.Height < bitmap.Value.Width ? bitmap.Value.Height : bitmap.Value.Width;
+                for (int i = 0; i <= IMAGE_SIZE; i++)
+                {
+                    if ((commonValue - i) % IMAGE_SIZE == 0)
+                    {
+                        if (valueToReturn == 0)
+                            valueToReturn = commonValue;
+                        else if (valueToReturn > commonValue)
+                            valueToReturn = commonValue;
+                        break;
+                    }
+                }
+            }
+            return valueToReturn;
+        }
+
         private async void convertFile_Click(object sender, EventArgs e)
         {
             StartConvert(fileProgress);
+            var fileName = fileBrowser.FileName;
+            var bitmaps = new Dictionary<string, Bitmap>();
+            bitmaps.Add(fileName, new Bitmap(fileName));
+            var commonWidthHeight = GetCommonWidthHeight(bitmaps);
 
-            await Task.Run(() => ParseFile(fileBrowser.FileName));
+            await Task.Run(() => ParseFile(fileName, bitmaps.Single(x => x.Key == fileName).Value, commonWidthHeight));
 
             SuccesfullyConvert(fileProgress);
+        }
+
+        private void DisposeBitmaps(List<Bitmap> bitmaps)
+        {
+            foreach (var bitmap in bitmaps)
+            {
+                bitmap.Dispose();
+            }
         }
 
         private async void convertFolder_Click(object sender, EventArgs e)
